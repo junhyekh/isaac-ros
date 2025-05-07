@@ -54,11 +54,6 @@ def create_nodes(num_robots):
     nodes += robot_nodes("PublishRawTransformTree", "isaacsim.ros2.bridge.ROS2PublishRawTransformTree")
     nodes += robot_nodes("PublishRawTransformTree_Odom", "isaacsim.ros2.bridge.ROS2PublishRawTransformTree")
     nodes += robot_nodes("PublishTransformTree", "isaacsim.ros2.bridge.ROS2PublishTransformTree")
-    nodes += robot_nodes("SubscribeRobotPose", "isaacsim.ros2.bridge.ROS2Subscriber")
-    nodes += robot_nodes("ThreeVector", "omni.graph.nodes.MakeVector3")
-    nodes += robot_nodes("FourVector", "omni.graph.nodes.MakeVector4")
-    nodes += robot_nodes("WritePrimTranslate", "omni.graph.nodes.WritePrimAttribute")
-    nodes += robot_nodes("WritePrimOrient", "omni.graph.nodes.WritePrimAttribute")
 
     return nodes
 
@@ -84,7 +79,6 @@ def connect_nodes(num_robots):
     connections += connect_tick("PublishRawTransformTree_Odom")
     connections += connect_tick("PublishTransformTree")
     connections += connect_tick("PrimService", no_robot=True)
-    connections += connect_tick("SubscribeRobotPose")
 
     # Odometry execution
     connections += [(f"ComputeOdometry_Robot_{i}.outputs:execOut", f"PublishOdometry_Robot_{i}.inputs:execIn") for i in range(num_robots)]
@@ -109,22 +103,7 @@ def connect_nodes(num_robots):
     connections += connect("ComputeOdometry", "PublishRawTransformTree_Odom", "orientation", "rotation")
     connections += connect("ComputeOdometry", "PublishOdometry", "position", "position")
     connections += connect("ComputeOdometry", "PublishRawTransformTree_Odom", "position", "translation")
-    
-    # Robot Pose connections
-    # connections += connect("SubscribeRobotPose", "ThreeVector", "position:x", "x")
-    # connections += connect("SubscribeRobotPose", "ThreeVector", "position:y", "y")
-    # connections += connect("SubscribeRobotPose", "ThreeVector", "position:z", "z")
-    # connections += connect("SubscribeRobotPose", "FourVector", "orientation:x", "x")
-    # connections += connect("SubscribeRobotPose", "FourVector", "orientation:y", "y")
-    # connections += connect("SubscribeRobotPose", "FourVector", "orientation:z", "z")
-    # connections += connect("SubscribeRobotPose", "FourVector", "orientation:w", "w")
-
-    connections += [(f"SubscribeRobotPose_Robot_{i}.outputs:execOut", f"WritePrimTranslate_Robot_{i}.inputs:execIn") for i in range(num_robots)]
-    connections += [(f"SubscribeRobotPose_Robot_{i}.outputs:execOut", f"WritePrimOrient_Robot_{i}.inputs:execIn") for i in range(num_robots)]
-
-    connections += connect("ThreeVector", "WritePrimTranslate", "tuple", "value")
-    connections += connect("FourVector", "WritePrimOrient", "tuple", "value")
-
+        
     return connections
 
 def set_values(num_robots):
@@ -156,18 +135,6 @@ def set_values(num_robots):
     setvals += set_value("PublishTransformTree", "parentPrim", lambda i: f"/World/G1_{i}/pelvis")
     setvals += set_value("PublishTransformTree", "targetPrims", lambda i: f"/World/G1_{i}/torso_link")
     
-    # Robot Pose
-    setvals += set_value("SubscribeRobotPose", "messagePackage", lambda i: f"geometry_msgs")
-    setvals += set_value("SubscribeRobotPose", "messageName", lambda i: f"Pose")
-    setvals += set_value("SubscribeRobotPose", "topicName", lambda i: f"robot_pose")
-    setvals += set_value("SubscribeRobotPose", "nodeNamespace", lambda i: f"G1_{i}")
-    
-    setvals += set_value("WritePrimTranslate", "prim", lambda i: f"/World/G1_{i}")
-    setvals += set_value("WritePrimTranslate", "name", lambda i: f"xformOp:translate")
-
-    setvals += set_value("WritePrimOrient", "prim", lambda i: f"/World/G1_{i}")
-    setvals += set_value("WritePrimOrient", "name", lambda i: f"xformOp:orient")
-
     return setvals
 
 # ----------- MAIN -------------
@@ -179,20 +146,7 @@ try:
             og.Controller.Keys.SET_VALUES: set_values(num_robots),
             og.Controller.Keys.CONNECT: connect_nodes(num_robots),
         },
-    )
-    
-    def connect(source, dest, attr_src, attr_dest):
-        for i in range(num_robots):
-            og.Controller.connect(f"/ActionGraph/{source}_Robot_{i}.outputs:{attr_src}", f"/ActionGraph/{dest}_Robot_{i}.inputs:{attr_dest}")
-    
-    connect("SubscribeRobotPose", "ThreeVector", "position:y", "y")
-    connect("SubscribeRobotPose", "ThreeVector", "position:x", "x")
-    connect("SubscribeRobotPose", "ThreeVector", "position:z", "z")
-    connect("SubscribeRobotPose", "FourVector", "orientation:x", "x")
-    connect("SubscribeRobotPose", "FourVector", "orientation:y", "y")
-    connect("SubscribeRobotPose", "FourVector", "orientation:z", "z")
-    connect("SubscribeRobotPose", "FourVector", "orientation:w", "w")
-    
+    )    
         
 except Exception as e:
     print("[Error] " + str(e))
