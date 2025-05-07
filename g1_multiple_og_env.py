@@ -25,6 +25,7 @@ from isaacsim.storage.native import get_assets_root_path
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Pose
+from std_srvs.srv import SetBool, Trigger
 
 from isaacsim.core.prims import SingleArticulation
 import omni.graph.core as og
@@ -173,6 +174,9 @@ class G1:
                                         position=position,
                                         orientation=orientation
                                         )
+
+        self.default_position = np.array([0.0, 0.0, 0.0]) if position is None else position
+        self.default_orientation = np.array([1.0, 0.0, 0.0, 0.0]) if orientation is None else orientation
     
     def initialize(
         self,
@@ -261,31 +265,33 @@ for robot in robots:
     robot.initialize()
 
 # ---------- ROS2 Node for each robot ----------
-class RobotPoseSetter(Node):
+class RobotPoseSetterService(Node):
     def __init__(self, robot_id, robot: G1):
         super().__init__(f'robot_pose_setter_{robot_id}')
         self.robot_id = robot_id
         self.robot = robot
 
-        topic_name = f'/G1_{robot_id}/set_robot_pose'
-        self.subscription = self.create_subscription(
-            Pose,
-            topic_name,
-            self.listener_callback,
-            10)
+        service_name = f'/G1_{robot_id}/set_robot_pose'
+        self.srv = self.create_service(Trigger, service_name, self.handle_set_pose)
 
-        self.get_logger().info(f"Listening on {topic_name}")
+        self.get_logger().info(f"Service ready on {service_name}")
 
-    def listener_callback(self, msg):
-        pos = np.array([[msg.position.x, msg.position.y, msg.position.z]])
-        quat = np.array([[msg.orientation.w, msg.orientation.x, msg.orientation.y, msg.orientation.z]])
-        # indices  = self.robot.robot._articulation_view._body_indices[0]
-
-        self.get_logger().info(f"Received pose for robot {self.robot_id}: {pos} | {quat}")
+    def handle_set_pose(self, request, response):
+        av = self.robot.robot._articulation_view
+        pos = self.robot.default_position[None, :]
+        quat = self.robot.default_orientation[None, :]
         
-        self.robot.robot._articulation_view.set_local_poses(translations=pos, orientations=quat)
-        # self.robot.robot.set_joint_positions(np.zeros((self.robot.robot.num_dof,)))
-        # self.robot.robot.set_joint_velocities(np.zeros((self.robot.robot.num_dof,)))
+        # Teleport (local pose can be used if parent does not move)
+        av.set_local_poses(translations=pos, orientations=quat)
+        av.set_joint_positions(av._default_joints_state.positions)
+        av.set_joint_velocities(av._default_joints_state.velocities)
+        av.set_joint_efforts(av._default_joints_state.efforts)
+
+        self.get_logger().info(f"Teleported robot {self.robot_id} to {pos} | {quat}")
+
+        response.success = True
+        response.message = "Pose set successfully"
+        return response
         
 # Init ROS
 rclpy.init()
@@ -293,7 +299,7 @@ rclpy.init()
 # Create nodes per robot
 nodes = []
 for i in range(num_robots):
-    node = RobotPoseSetter(i, robots[i])
+    node = RobotPoseSetterService(i, robots[i])
     nodes.append(node)
 
 # ---------- Main Simulation Loop ----------
