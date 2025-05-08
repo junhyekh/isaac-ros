@@ -188,8 +188,6 @@ class G1:
         effort_modes: str = "force",
         control_mode: str = "position",
         set_gains: bool = True,
-        set_limits: bool = True,
-        set_articulation_props: bool = True,
     ) -> None:
         """
         Initializes the robot and sets up the controller.
@@ -205,39 +203,67 @@ class G1:
         self.robot.initialize(physics_sim_view=physics_sim_view)
         self.robot.get_articulation_controller().set_effort_modes(effort_modes)
         self.robot.get_articulation_controller().switch_control_mode(control_mode)
-        # max_effort, max_vel, stiffness, damping, self.default_pos, self.default_vel = get_robot_joint_properties(
-        #     self.policy_env_params, self.robot.dof_names
-        # )
-        # if set_gains:
-        #     self.robot._articulation_view.set_gains(stiffness, damping)
-        # if set_limits:
-        #     self.robot._articulation_view.set_max_efforts(max_effort)
-        #     self.robot._articulation_view.set_max_joint_velocities(max_vel)
-        # if set_articulation_props:
-        #     self._set_articulation_props()
 
-    # def _set_articulation_props(self) -> None:
-    #     """
-    #     Sets the articulation root properties from the policy environment parameters.
-    #     """
-    #     articulation_prop = get_articulation_props(self.policy_env_params)
+        full_joint_names = self.robot.dof_names
+        
+        if set_gains:    
+            # Define the gain values for each pattern
+            joint_patterns = {
+                'hip_yaw': (100, 2),   # (kp, kd) for hip_yaw joints
+                'hip_roll': (100, 2),  # (kp, kd) for hip_roll joints
+                'hip_pitch': (100, 2), # (kp, kd) for hip_pitch joints
+                'knee': (150, 4),     # (kp, kd) for knee joints
+                'ankle': (40, 2)      # (kp, kd) for ankle joints
+            }
 
-    #     solver_position_iteration_count = articulation_prop.get("solver_position_iteration_count")
-    #     solver_velocity_iteration_count = articulation_prop.get("solver_velocity_iteration_count")
-    #     stabilization_threshold = articulation_prop.get("stabilization_threshold")
-    #     enabled_self_collisions = articulation_prop.get("enabled_self_collisions")
-    #     sleep_threshold = articulation_prop.get("sleep_threshold")
+            # Initialize lists to store the matching joint names and their respective gains
+            matching_joint_names = []
+            kps = []
+            kds = []
+            
+            def matching_joint():
+                # Loop over the joint patterns to find the matching joints and assign gains
+                for pattern, (kp, kd) in joint_patterns.items():
+                    # Find joints matching the pattern (e.g., *_hip_yaw_*, *_hip_roll_*, etc.)
+                    pattern_matching_joints = [joint for joint in full_joint_names if pattern in joint]
+                    
+                    # Add the matching joints to the list
+                    matching_joint_names.extend(pattern_matching_joints)
+                    
+                    # Add the corresponding gains to the lists
+                    kps.extend([kp] * len(pattern_matching_joints))
+                    kds.extend([kd] * len(pattern_matching_joints))
+            
+            matching_joint()
+            self.robot._articulation_view.set_gains(kps=np.array(kps), 
+                                                    kds=np.array(kds),
+                                                    joint_names=matching_joint_names
+                                                    )
 
-    #     if solver_position_iteration_count not in [None, float("inf")]:
-    #         self.robot.set_solver_position_iteration_count(solver_position_iteration_count)
-    #     if solver_velocity_iteration_count not in [None, float("inf")]:
-    #         self.robot.set_solver_velocity_iteration_count(solver_velocity_iteration_count)
-    #     if stabilization_threshold not in [None, float("inf")]:
-    #         self.robot.set_stabilization_threshold(stabilization_threshold)
-    #     if isinstance(enabled_self_collisions, bool):
-    #         self.robot.set_enabled_self_collisions(enabled_self_collisions)
-    #     if sleep_threshold not in [None, float("inf")]:
-    #         self.robot.set_sleep_threshold(sleep_threshold)
+        default_joint_angles = { # = target angles [rad] when action = 0.0
+           'left_hip_yaw_joint' : 0. ,   
+           'left_hip_roll_joint' : 0,               
+           'left_hip_pitch_joint' : -0.1,         
+           'left_knee_joint' : 0.3,       
+           'left_ankle_pitch_joint' : -0.2,     
+           'left_ankle_roll_joint' : 0,     
+           'right_hip_yaw_joint' : 0., 
+           'right_hip_roll_joint' : 0, 
+           'right_hip_pitch_joint' : -0.1,                                       
+           'right_knee_joint' : 0.3,                                             
+           'right_ankle_pitch_joint': -0.2,                              
+           'right_ankle_roll_joint' : 0,       
+           'torso_joint' : 0.
+        }
+        
+        joints_default_position = []
+        for joint_name in full_joint_names:
+            if joint_name in default_joint_angles.keys():
+                joints_default_position.append(default_joint_angles[joint_name])
+            else:
+                joints_default_position.append(0.0)
+
+        self.robot.set_joints_default_state(np.array(joints_default_position))
         
 
 robots = []
