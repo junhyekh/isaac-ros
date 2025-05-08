@@ -33,6 +33,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Pose
 from std_srvs.srv import SetBool, Trigger
+from nav_msgs.msg import Odometry
 
 from isaacsim.core.prims import SingleArticulation
 import omni.graph.core as og
@@ -49,18 +50,50 @@ env_url = "/Isaac/Environments/Grid/default_environment.usd"
 enable_extension("isaacsim.ros2.bridge")
 # Creating a action graph with ROS component nodes
 
-class SimTimePublisher(Node):
+class SimPublishers(Node):
     def __init__(self):
-        super().__init__('sim_time_publisher')
-        self.publisher_ = self.create_publisher(TimeMsg, '/sim_time', 10)
+        super().__init__('sim_publishers')
+        self.simtime_publisher_ = self.create_publisher(TimeMsg, '/sim_time', 10)
 
-    def publish(self, sim_time):
+        self.publisher_odom = []
+        for i in range(num_robots):
+            self.publisher_odom.append(self.create_publisher(Odometry, f'/G1_{i}/odom', 10))
+
+    def simtime_publish(self, sim_time):
         # advance sim_time
         # split into sec / nanosec
         sec = int(sim_time)
         nanosec = int((sim_time - sec) * 1e9)
         msg = TimeMsg(sec=sec, nanosec=nanosec)
-        self.publisher_.publish(msg)
+        self.simtime_publisher_.publish(msg)
+    
+    def pub_odometry(self, pos, quat, lin_ves, ang_vel, robot_id):
+        # Create a new Odometry message
+        odom_msg = Odometry()
+        # Set the header
+        odom_msg.header.stamp = self.get_clock().now().to_msg()
+        odom_msg.header.frame_id = "odom"
+        odom_msg.child_frame_id = f"G1_{robot_id}/base_link"
+        # Set the position
+        odom_msg.pose.pose.position.x = float(pos[0])
+        odom_msg.pose.pose.position.y = float(pos[1])
+        odom_msg.pose.pose.position.z = float(pos[2])
+        # Set the orientation
+        odom_msg.pose.pose.orientation.w = float(quat[0])
+        odom_msg.pose.pose.orientation.x = float(quat[1])
+        odom_msg.pose.pose.orientation.y = float(quat[2])
+        odom_msg.pose.pose.orientation.z = float(quat[3])
+        # Set the linear velocity
+        odom_msg.twist.twist.linear.x = float(lin_ves[0])
+        odom_msg.twist.twist.linear.y = float(lin_ves[1])
+        odom_msg.twist.twist.linear.z = float(lin_ves[2])
+        # Set the angular velocity
+        odom_msg.twist.twist.angular.x = float(ang_vel[0])
+        odom_msg.twist.twist.angular.y = float(ang_vel[1])
+        odom_msg.twist.twist.angular.z = float(ang_vel[2])
+        # Publish the message
+        self.publisher_odom[robot_id].publish(odom_msg)
+        
 
 def create_nodes(num_robots):
     nodes = [
@@ -75,7 +108,7 @@ def create_nodes(num_robots):
     nodes += robot_nodes("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState")
     nodes += robot_nodes("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState")
     nodes += robot_nodes("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController")
-    nodes += robot_nodes("ComputeOdometry", "isaacsim.core.nodes.IsaacComputeOdometry")
+    # nodes += robot_nodes("ComputeOdometry", "isaacsim.core.nodes.IsaacComputeOdometry")
     nodes += robot_nodes("PublishOdometry", "isaacsim.ros2.bridge.ROS2PublishOdometry")
     nodes += robot_nodes("PublishRawTransformTree", "isaacsim.ros2.bridge.ROS2PublishRawTransformTree")
     nodes += robot_nodes("PublishRawTransformTree_Odom", "isaacsim.ros2.bridge.ROS2PublishRawTransformTree")
@@ -100,14 +133,14 @@ def connect_nodes(num_robots):
     connections += connect_tick("PublishJointState")
     connections += connect_tick("SubscribeJointState")
     connections += connect_tick("ArticulationController")
-    connections += connect_tick("ComputeOdometry")
+    # connections += connect_tick("ComputeOdometry")
     connections += connect_tick("PublishRawTransformTree")
-    connections += connect_tick("PublishRawTransformTree_Odom")
+    # connections += connect_tick("PublishRawTransformTree_Odom")
     connections += connect_tick("PublishTransformTree")
     connections += connect_tick("PrimService", no_robot=True)
 
     # Odometry execution
-    connections += [(f"ComputeOdometry_Robot_{i}.outputs:execOut", f"PublishOdometry_Robot_{i}.inputs:execIn") for i in range(num_robots)]
+    # connections += [(f"ComputeOdometry_Robot_{i}.outputs:execOut", f"PublishOdometry_Robot_{i}.inputs:execIn") for i in range(num_robots)]
 
     # Time connections
     connections += connect_time("PublishJointState")
@@ -123,12 +156,12 @@ def connect_nodes(num_robots):
     connections += connect("SubscribeJointState", "ArticulationController", "effortCommand", "effortCommand")
 
     # Odometry data connections
-    connections += connect("ComputeOdometry", "PublishOdometry", "angularVelocity", "angularVelocity")
-    connections += connect("ComputeOdometry", "PublishOdometry", "linearVelocity", "linearVelocity")
-    connections += connect("ComputeOdometry", "PublishOdometry", "orientation", "orientation")
-    connections += connect("ComputeOdometry", "PublishRawTransformTree_Odom", "orientation", "rotation")
-    connections += connect("ComputeOdometry", "PublishOdometry", "position", "position")
-    connections += connect("ComputeOdometry", "PublishRawTransformTree_Odom", "position", "translation")
+    # connections += connect("ComputeOdometry", "PublishOdometry", "angularVelocity", "angularVelocity")
+    # connections += connect("ComputeOdometry", "PublishOdometry", "linearVelocity", "linearVelocity")
+    # connections += connect("ComputeOdometry", "PublishOdometry", "orientation", "orientation")
+    # connections += connect("ComputeOdometry", "PublishRawTransformTree_Odom", "orientation", "rotation")
+    # connections += connect("ComputeOdometry", "PublishOdometry", "position", "position")
+    # connections += connect("ComputeOdometry", "PublishRawTransformTree_Odom", "position", "translation")
         
     return connections
 
@@ -150,13 +183,13 @@ def set_values(num_robots):
         setvals += set_value(name, "nodeNamespace", lambda i: f"G1_{i}")
 
     # Odometry
-    setvals += set_value("ComputeOdometry", "chassisPrim", lambda i: f"/World/G1_{i}/pelvis")
+    # setvals += set_value("ComputeOdometry", "chassisPrim", lambda i: f"/World/G1_{i}/pelvis")
     setvals += set_value("PublishRawTransformTree", "parentFrameId", lambda i: "odom")
     setvals += set_value("PublishRawTransformTree", "childFrameId", lambda i: "pelvis")
-    setvals += set_value("PublishOdometry", "chassisFrameId", lambda i: "pelvis")
-    setvals += set_value("PublishOdometry", "odomFrameId", lambda i: "odom")
-    setvals += set_value("PublishRawTransformTree_Odom", "parentFrameId", lambda i: "world")
-    setvals += set_value("PublishRawTransformTree_Odom", "childFrameId", lambda i: "odom")
+    # setvals += set_value("PublishOdometry", "chassisFrameId", lambda i: "pelvis")
+    # setvals += set_value("PublishOdometry", "odomFrameId", lambda i: "odom")
+    # setvals += set_value("PublishRawTransformTree_Odom", "parentFrameId", lambda i: "world")
+    # setvals += set_value("PublishRawTransformTree_Odom", "childFrameId", lambda i: "odom")
 
     # # TF
     # setvals += set_value("PublishTransformTree", "parentPrim", lambda i: f"/World/G1_{i}/pelvis/pelvis")
@@ -233,7 +266,7 @@ class G1:
             # Define the gain values for each pattern
             joint_patterns = {
                 'hip_yaw': (100, 2),   # (kp, kd) for hip_yaw joints
-                'hip_roll': (100, 1),  # (kp, kd) for hip_roll joints
+                'hip_roll': (100, 2),  # (kp, kd) for hip_roll joints
                 'hip_pitch': (100, 2), # (kp, kd) for hip_pitch joints
                 'knee': (150, 4),     # (kp, kd) for knee joints
                 'ankle': (40, 2)      # (kp, kd) for ankle joints
@@ -299,8 +332,8 @@ class G1:
 
 robots = []
 # spawn world
-physics_dt = 1 / 500
-rendering_dt = 1 / 200
+physics_dt = 1 / 400
+rendering_dt = 1 / 100
 # my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 200, rendering_dt=8 / 200)
 my_world = World(stage_units_in_meters=1.0, physics_dt=physics_dt, rendering_dt=rendering_dt)
 assets_root_path = get_assets_root_path()
@@ -308,15 +341,12 @@ if assets_root_path is None:
     carb.log_error("Could not find Isaac Sim assets folder")
 
 # spawn warehouse scene
-# prim = define_prim("/World/Ground", "Xform")
-# asset_path = assets_root_path + env_url
-# prim.GetReferences().AddReference(asset_path)
 my_world.scene.add_default_ground_plane(
             z_position=0,
             name="default_ground_plane",
             prim_path="/World/defaultGroundPlane",
-            static_friction=1.0,
-            dynamic_friction=1.0,
+            static_friction=10.0,
+            dynamic_friction=10.0,
             restitution=0.01,
 )
 
@@ -356,13 +386,16 @@ class RobotPoseSetterService(Node):
         pos = self.robot.default_position[None, :]
         quat = self.robot.default_orientation[None, :]
         
-        # Teleport (local pose can be used if parent does not move)
-        av.set_local_poses(translations=pos, orientations=quat)
-        av.set_joint_positions(av._default_joints_state.positions)
-        av.set_joint_velocities(av._default_joints_state.velocities)
-        av.set_joint_efforts(av._default_joints_state.efforts)
-        
-        av.set_joint_position_targets(av._default_joints_state.positions)
+        for _ in range(10):
+            # Teleport (local pose can be used if parent does not move)
+            av.set_local_poses(translations=pos, orientations=quat)
+            av.set_joint_positions(av._default_joints_state.positions)
+            av.set_joint_velocities(np.zeros_like(av._default_joints_state.velocities))
+            av.set_joint_efforts(np.zeros_like(av._default_joints_state.efforts))
+            
+            av.set_joint_position_targets(av._default_joints_state.positions)
+
+            my_world.step(render=False)
 
         self.get_logger().info(f"Teleported robot {self.robot_id} to {pos} | {quat}")
 
@@ -378,7 +411,7 @@ nodes = []
 for i in range(num_robots):
     node = RobotPoseSetterService(i, robots[i])
     nodes.append(node)
-sim_time_pub = SimTimePublisher()
+sim_time_pub = SimPublishers()
 nodes.append(sim_time_pub)
 
 # # ---------- Main Simulation Loop ----------
@@ -389,20 +422,32 @@ while simulation_app.is_running():
     my_world.step(render=True)
     physics_cnt += 1
     # Publish simulation time
-    sim_time_pub.publish(sim_context.current_time)
+    sim_time_pub.simtime_publish(sim_context.current_time)
     # Spin all nodes
     for node in nodes:
-        rclpy.spin_once(node, timeout_sec=0.0001)
+        rclpy.spin_once(node, timeout_sec=0.001)
     
     print(f"[API]    sim time = {sim_context.current_time:.3f} s")
     
     # print(sim_time)
     # print(robots[0].robot.dof_names)
     av = robots[0].robot._articulation_view
-    joint_positions = np.array(av.get_joint_positions())[...,robots[0].joint_indices]
-    joint_velocities = np.array(av.get_joint_velocities())[...,robots[0].joint_indices]
-    print("Joint positions: ", joint_positions)
-    print("Joint velocities: ", joint_velocities)
+    # joint_positions = np.array(av.get_joint_positions())[...,robots[0].joint_indices]
+    # joint_velocities = np.array(av.get_joint_velocities())[...,robots[0].joint_indices]
+    # print("Joint positions: ", joint_positions)
+    # print("Joint velocities: ", joint_velocities)
+
+    for i in range(num_robots):
+        # Get the linear and angular velocities of the robot
+        av = robots[i].robot._articulation_view
+        local_pos, local_quat = av.get_local_poses()
+        # print("Local pose: ", local_pose)
+        linear_velocities = av.get_linear_velocities()  # (, 3)
+        angular_velocities = av.get_angular_velocities()  # (, 3)
+        # print("Joint positions: ", linear_velocities)
+        # print("Joint velocities: ", angular_velocities)
+        # Publish the odometry message
+        sim_time_pub.pub_odometry(local_pos[0], local_quat[0], np.array(linear_velocities[0]).astype(np.float32), np.array(angular_velocities[0]).astype(np.float32), i)
 
 # # Cleanup
 for node in nodes:
