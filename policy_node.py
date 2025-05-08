@@ -13,7 +13,7 @@ from builtin_interfaces.msg import Time as TimeMsg
 
 LEGGED_GYM_ROOT_DIR = 'unitree_rl_gym'
 REAL_TIME_FACTOR = 1.0
-ROBOT_ID = 0
+ROBOT_ID = 2
 
 def get_gravity_orientation(quaternion):
     qx = quaternion[0]
@@ -61,6 +61,7 @@ class G1ObservationSubscriber(Node):
         self.joint_msg = None
         self.obs = None
         self.simtime = None
+        self.init_simtime = None
         self.init_joint_msg = None
 
         # subscriptions
@@ -97,7 +98,9 @@ class G1ObservationSubscriber(Node):
         # self.simtime = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
     
     def simtime_callback(self, msg:TimeMsg):
-        self.simtime = msg.sec + msg.nanosec * 1e-9
+        if self.init_simtime is None:
+            self.init_simtime = msg.sec + msg.nanosec * 1e-9
+        self.simtime = msg.sec + msg.nanosec * 1e-9 - self.init_simtime
 
     def compose_observation(self, cmd, prev_action) -> np.ndarray:
         if self.odom_msg is None or self.joint_msg is None:
@@ -107,7 +110,7 @@ class G1ObservationSubscriber(Node):
             self.odom_msg.twist.twist.angular.x,
             self.odom_msg.twist.twist.angular.y,
             self.odom_msg.twist.twist.angular.z,
-        ]) * self.ang_vel_scale
+        ]) /180*np.pi * self.ang_vel_scale
 
         # --- 2) gravity orientation in body frame ---
         quat = np.array([
@@ -267,8 +270,8 @@ def main(args=None):
         # Close the viewer automatically after simulation_duration wall-seconds.
         step_start = node.simtime
         # counter = 0
-        # client.send_requests()
-        # client.wait_and_report()
+        client.send_requests()
+        client.wait_and_report()
         while True:
             rclpy.spin_once(node)
             # print(node.obs.shape)

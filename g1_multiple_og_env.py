@@ -240,7 +240,7 @@ class G1:
         physics_sim_view: omni.physics.tensors.SimulationView = None,
         effort_modes: str = "force",
         control_mode: str = "position",
-        set_gains: bool = False,
+        set_gains: bool = True,
     ) -> None:
         """
         Initializes the robot and sets up the controller.
@@ -284,8 +284,8 @@ class G1:
                     matching_joint_names.extend(pattern_matching_joints)
                     
                     # Add the corresponding gains to the lists
-                    kps.extend([kp] * len(pattern_matching_joints))
-                    kds.extend([kd] * len(pattern_matching_joints))
+                    kps.extend([kp*180/np.pi] * len(pattern_matching_joints))
+                    kds.extend([kd*180/np.pi] * len(pattern_matching_joints))
             
             matching_joint()
             self.robot._articulation_view.set_gains(kps=np.array(kps), 
@@ -321,8 +321,8 @@ class G1:
 
 robots = []
 # spawn world
-physics_dt = 1 / 200
-rendering_dt = 8 / 200
+physics_dt = 1 / 500
+rendering_dt = 1 / 100
 # my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 200, rendering_dt=8 / 200)
 my_world = World(stage_units_in_meters=1.0, physics_dt=physics_dt, rendering_dt=rendering_dt)
 assets_root_path = get_assets_root_path()
@@ -343,7 +343,7 @@ for i in range(0, num_robots):
         # usd_path=assets_root_path + "/Isaac/Robots/Unitree/G1/g1_minimal.usd",
         usd_path=assets_root_path + "/Isaac/Robots/Unitree/G1/g1.usd",
         # usd_path='/root/isaac-ros/assets/g1_12dof.usd',
-        position=np.array([0, i, 1.00])
+        position=np.array([0, i, 0.80])
     )
     # g1.prim.initialize()
     robots.append(g1)
@@ -397,7 +397,6 @@ nodes.append(sim_time_pub)
 # # ---------- Main Simulation Loop ----------
 
 sim_context = SimulationContext()
-# sim_context = SimulationContext.get_instance()
 physics_cnt = 0
 while simulation_app.is_running():
     my_world.step(render=True)
@@ -408,7 +407,6 @@ while simulation_app.is_running():
     for node in nodes:
         rclpy.spin_once(node, timeout_sec=0.0001)
     
-    # ask Isaac Sim for the current physics time
     print(f"[API]    sim time = {sim_context.current_time:.3f} s")
     
     # print(sim_time)
