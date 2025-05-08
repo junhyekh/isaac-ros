@@ -7,6 +7,9 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 
+import os, sys
+BASEDIR = os.path.dirname(os.path.abspath(__file__))
+
 from isaacsim import SimulationApp
 
 simulation_app = SimulationApp({"headless": False})
@@ -40,7 +43,7 @@ from builtin_interfaces.msg import Time as TimeMsg
 from isaacsim.core.api.simulation_context import SimulationContext
 
 
-num_robots = 1
+num_robots = 5
 env_url = "/Isaac/Environments/Grid/default_environment.usd"
 
 enable_extension("isaacsim.ros2.bridge")
@@ -230,7 +233,7 @@ class G1:
             # Define the gain values for each pattern
             joint_patterns = {
                 'hip_yaw': (100, 2),   # (kp, kd) for hip_yaw joints
-                'hip_roll': (100, 2),  # (kp, kd) for hip_roll joints
+                'hip_roll': (100, 1),  # (kp, kd) for hip_roll joints
                 'hip_pitch': (100, 2), # (kp, kd) for hip_pitch joints
                 'knee': (150, 4),     # (kp, kd) for knee joints
                 'ankle': (40, 2)      # (kp, kd) for ankle joints
@@ -251,8 +254,8 @@ class G1:
                     matching_joint_names.extend(pattern_matching_joints)
                     
                     # Add the corresponding gains to the lists
-                    kps.extend([kp*180/np.pi] * len(pattern_matching_joints))
-                    kds.extend([kd*180/np.pi] * len(pattern_matching_joints))
+                    kps.extend([kp] * len(pattern_matching_joints))
+                    kds.extend([kd] * len(pattern_matching_joints))
             
             matching_joint()
             self.robot._articulation_view.set_gains(kps=np.array(kps), 
@@ -275,7 +278,14 @@ class G1:
            'right_ankle_roll_joint' : 0,       
            'torso_joint' : 0.
         }
-        
+
+        self.joint_indices = []
+        for joint_seq in ['left_hip_pitch_joint', 'left_hip_roll_joint', 'left_hip_yaw_joint', 'left_knee_joint', 'left_ankle_pitch_joint', 'left_ankle_roll_joint',
+                'right_hip_pitch_joint', 'right_hip_roll_joint', 'right_hip_yaw_joint', 'right_knee_joint', 'right_ankle_pitch_joint', 'right_ankle_roll_joint']:
+            assert joint_seq in full_joint_names, f"Joint {joint_seq} not found in robot's joint names"
+            self.joint_indices.append(full_joint_names.index(joint_seq))
+        self.joint_indices = np.array(self.joint_indices)
+
         joints_default_position = []
         for joint_name in full_joint_names:
             if joint_name in default_joint_angles.keys():
@@ -289,7 +299,7 @@ class G1:
 
 robots = []
 # spawn world
-physics_dt = 1 / 200
+physics_dt = 1 / 500
 rendering_dt = 1 / 200
 # my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 200, rendering_dt=8 / 200)
 my_world = World(stage_units_in_meters=1.0, physics_dt=physics_dt, rendering_dt=rendering_dt)
@@ -316,7 +326,8 @@ for i in range(0, num_robots):
         prim_path="/World/G1_" + str(i),
         # prim_path=f"/World/G1_{i}/pelvis",
         name="G1_" + str(i),
-        usd_path="/isaac-sim/nmanshow/g1_12dof/g1_12dof.usd",
+        # usd_path='/root/isaac-ros/assets/g1_12dof.usd',
+        usd_path=os.path.join(BASEDIR, "g1_12dof/g1_12dof.usd"),
         position=np.array([0, i, 0.8])
     )
     # g1.prim.initialize()
@@ -386,11 +397,12 @@ while simulation_app.is_running():
     print(f"[API]    sim time = {sim_context.current_time:.3f} s")
     
     # print(sim_time)
-    # av = robots[0].robot._articulation_view
-    # joint_positions = av.get_joint_positions()
-    # joint_velocities = av.get_joint_velocities()
-    # print("Joint positions: ", joint_positions)
-    # print("Joint velocities: ", joint_velocities)
+    # print(robots[0].robot.dof_names)
+    av = robots[0].robot._articulation_view
+    joint_positions = np.array(av.get_joint_positions())[...,robots[0].joint_indices]
+    joint_velocities = np.array(av.get_joint_velocities())[...,robots[0].joint_indices]
+    print("Joint positions: ", joint_positions)
+    print("Joint velocities: ", joint_velocities)
 
 # # Cleanup
 for node in nodes:

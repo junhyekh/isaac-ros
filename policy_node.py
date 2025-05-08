@@ -110,7 +110,9 @@ class G1ObservationSubscriber(Node):
             self.odom_msg.twist.twist.angular.x,
             self.odom_msg.twist.twist.angular.y,
             self.odom_msg.twist.twist.angular.z,
-        ]) /180*np.pi * self.ang_vel_scale
+        ]) * self.ang_vel_scale/180.0*np.pi
+
+
 
         # --- 2) gravity orientation in body frame ---
         quat = np.array([
@@ -127,12 +129,11 @@ class G1ObservationSubscriber(Node):
         # --- 3) joint positions & velocities, scaled & zero‐centered ---
         joint_names = self.joint_msg.name
         walking_joint_indices = []
-        for i, name in enumerate(joint_names):
-            if name in self.walking_joint_names:
-                walking_joint_indices.append(i)
+        for i, name in enumerate(self.walking_joint_names):
+            walking_joint_indices.append(joint_names.index(name))
         walking_joint_indices = np.array(walking_joint_indices)
 
-        qj = copy.deepcopy(np.array(self.joint_msg.position))[walking_joint_indices]/180.0*np.pi
+        qj = copy.deepcopy(np.array(self.joint_msg.position))[walking_joint_indices]
         dqj = copy.deepcopy(np.array(self.joint_msg.velocity))[walking_joint_indices]/180.0*np.pi
 
         qj = (qj - self.default_angles) * self.dof_pos_scale
@@ -186,8 +187,8 @@ class G1ObservationSubscriber(Node):
         msg.name = full_names
         msg.position = full_positions
         # optional: zero velocities & efforts, or keep from joint_msg
-        # msg.velocity = [0.0] * len(full_names)
-        # msg.effort   = [0.0] * len(full_names)
+        msg.velocity = [0.0] * len(full_names)
+        msg.effort   = [0.0] * len(full_names)
 
         self.action_pub.publish(msg)
 
@@ -224,6 +225,9 @@ class ResetPoseClient(Node):
 
 
 def main(args=None):
+
+
+
     rclpy.init(args=args)
 
     with open(f"unitree_rl_gym/deploy/deploy_mujoco/configs/g1.yaml", "r") as f:
@@ -265,11 +269,14 @@ def main(args=None):
     # load policy
     policy = torch.jit.load(policy_path)
 
+    target_dof_pos_list = np.load('target_dof_pos_list.npy', allow_pickle=True)
+    # target_dof_pos_list[:,1] = 0
+    # target_dof_pos_list[:,1+6] = 0
 
     try:
         # Close the viewer automatically after simulation_duration wall-seconds.
         step_start = node.simtime
-        # counter = 0
+        counter = 0
         client.send_requests()
         client.wait_and_report()
         while True:
@@ -283,6 +290,7 @@ def main(args=None):
             # 50 Hz
             if node.simtime - step_start > 0.02*REAL_TIME_FACTOR:
                 step_start = node.simtime
+                counter += 1
             # if counter % control_decimation == 0:
                 obs = node.compose_observation(cmd, action)
                 if obs is None:
@@ -299,6 +307,7 @@ def main(args=None):
                 # transform action to target_dof_pos
                 target_dof_pos = action * action_scale + default_angles
                 node.pub_action(target_dof_pos)
+                # node.pub_action(target_dof_pos_list[counter])
 
 
                 # print(target_dof_pos)
