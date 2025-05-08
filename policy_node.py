@@ -32,15 +32,11 @@ def get_gravity_orientation(quaternion):
     qy = quaternion[1]
     qz = quaternion[2]
     qw = quaternion[3]
-
     gravity_orientation = np.zeros(3)
-
     gravity_orientation[0] = 2 * (-qz * qx + qw * qy)
     gravity_orientation[1] = -2 * (qz * qy + qw * qx)
     gravity_orientation[2] = 1 - 2 * (qw * qw + qz * qz)
-
     return gravity_orientation
-
 
 class G1ObservationSubscriber(Node):
     def __init__(self, default_angles, ang_vel_scale, dof_pos_scale, dof_vel_scale, cmd_scale, robot_id=0):
@@ -56,7 +52,7 @@ class G1ObservationSubscriber(Node):
             'right_hip_pitch_joint', 'right_hip_roll_joint', 'right_hip_yaw_joint', 'right_knee_joint', 'right_ankle_pitch_joint', 'right_ankle_roll_joint',
         ]
 
-        # joint‐related scalars (tweak these!)
+        # joint‐related scalars
         self.default_angles = default_angles
         self.dof_pos_scale = dof_pos_scale
         self.dof_vel_scale = dof_vel_scale
@@ -65,7 +61,6 @@ class G1ObservationSubscriber(Node):
 
         # storage for latest messages
         self.odom_msg = None
-        self.odom_raw_msg = None
         self.joint_msg = None
         self.obs = None
         self.simtime = None
@@ -92,13 +87,8 @@ class G1ObservationSubscriber(Node):
         # publisher
         self.action_pub = self.create_publisher(JointState, f'/G1_{self.robot_id}/joint_command', 10)
 
-        # periodic processing
-
     def odom_callback(self, msg: Odometry):
         self.odom_msg = msg
-    
-    def odom_raw_callback(self, msg: Odometry):
-        self.odom_raw_msg = msg
 
     def joint_callback(self, msg: JointState):
         if self.init_joint_msg is None:
@@ -178,31 +168,25 @@ class G1ObservationSubscriber(Node):
 
         # build and publish the message
         msg = JointState()
-        # msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.stamp = self.joint_msg.header.stamp
         msg.name = full_names
         msg.position = full_positions
-        # optional: zero velocities & efforts, or keep from joint_msg
-        # msg.velocity = [0.0] * len(full_names)
-        # msg.effort   = [0.0] * len(full_names)
-
         self.action_pub.publish(msg)
 
 class ResetPoseClient(Node):
     def __init__(self, rid):
         super().__init__('reset_pose_client')
-        self.clientss = {}
+        self.clients_ = {}
         self.futures = {}
         # create a client for each robot id
-        # for rid in robot_ids:
         srv_name = f'/G1_{rid}/set_robot_pose'
         cli = self.create_client(Trigger, srv_name)
         while not cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'Waiting for service {srv_name}...')
-        self.clientss[rid] = cli
+        self.clients_[rid] = cli
 
     def send_requests(self):
-        for rid, cli in self.clientss.items():
+        for rid, cli in self.clients_.items():
             req = Trigger.Request()
             self.futures[rid] = cli.call_async(req)
 
@@ -219,7 +203,6 @@ class ResetPoseClient(Node):
             except Exception as e:
                 self.get_logger().error(f"[Robot {rid}] service call failed: {e}")
 
-
 def main(args=None):
     rclpy.init(args=args)
 
@@ -232,12 +215,11 @@ def main(args=None):
         dof_vel_scale = config["dof_vel_scale"]
         action_scale = config["action_scale"]
         cmd_scale = np.array(config["cmd_scale"], dtype=np.float32)
-
-    node = G1ObservationSubscriber(default_angles, ang_vel_scale, dof_pos_scale, dof_vel_scale, cmd_scale, ROBOT_ID)
-    
-    client = ResetPoseClient(ROBOT_ID)
-
     action = np.zeros(12, dtype=np.float32)
+
+    # init ROS node
+    node = G1ObservationSubscriber(default_angles, ang_vel_scale, dof_pos_scale, dof_vel_scale, cmd_scale, ROBOT_ID)
+    client = ResetPoseClient(ROBOT_ID)
 
     # load policy
     policy = torch.jit.load(policy_path)
