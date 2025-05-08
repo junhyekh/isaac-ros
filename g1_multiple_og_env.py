@@ -22,10 +22,10 @@ from isaacsim.core.utils.prims import define_prim, get_prim_at_path
 from isaacsim.robot.policy.examples.robots import H1FlatTerrainPolicy
 from isaacsim.storage.native import get_assets_root_path
 
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import Pose
-from std_srvs.srv import SetBool, Trigger
+# import rclpy
+# from rclpy.node import Node
+# from geometry_msgs.msg import Pose
+# from std_srvs.srv import SetBool, Trigger
 
 from isaacsim.core.prims import SingleArticulation
 import omni.graph.core as og
@@ -135,7 +135,7 @@ def set_values(num_robots):
     # TF
     setvals += set_value("PublishTransformTree", "parentPrim", lambda i: f"/World/G1_{i}/pelvis")
     setvals += set_value("PublishTransformTree", "targetPrims", lambda i: f"/World/G1_{i}/torso_link")
-    
+
     return setvals
 
 # ----------- MAIN -------------
@@ -264,54 +264,54 @@ my_world.reset()
 for robot in robots:
     robot.initialize()
 
-# ---------- ROS2 Node for each robot ----------
-class RobotPoseSetterService(Node):
-    def __init__(self, robot_id, robot: G1):
-        super().__init__(f'robot_pose_setter_{robot_id}')
-        self.robot_id = robot_id
-        self.robot = robot
+# # ---------- ROS2 Node for each robot ----------
+# class RobotPoseSetterService(Node):
+#     def __init__(self, robot_id, robot: G1):
+#         super().__init__(f'robot_pose_setter_{robot_id}')
+#         self.robot_id = robot_id
+#         self.robot = robot
 
-        service_name = f'/G1_{robot_id}/set_robot_pose'
-        self.srv = self.create_service(Trigger, service_name, self.handle_set_pose)
+#         service_name = f'/G1_{robot_id}/set_robot_pose'
+#         self.srv = self.create_service(Trigger, service_name, self.handle_set_pose)
 
-        self.get_logger().info(f"Service ready on {service_name}")
+#         self.get_logger().info(f"Service ready on {service_name}")
 
-    def handle_set_pose(self, request, response):
-        av = self.robot.robot._articulation_view
-        pos = self.robot.default_position[None, :]
-        quat = self.robot.default_orientation[None, :]
+#     def handle_set_pose(self, request, response):
+#         av = self.robot.robot._articulation_view
+#         pos = self.robot.default_position[None, :]
+#         quat = self.robot.default_orientation[None, :]
         
-        # Teleport (local pose can be used if parent does not move)
-        av.set_local_poses(translations=pos, orientations=quat)
-        av.set_joint_positions(av._default_joints_state.positions)
-        av.set_joint_velocities(av._default_joints_state.velocities)
-        av.set_joint_efforts(av._default_joints_state.efforts)
+#         # Teleport (local pose can be used if parent does not move)
+#         av.set_local_poses(translations=pos, orientations=quat)
+#         av.set_joint_positions(av._default_joints_state.positions)
+#         av.set_joint_velocities(av._default_joints_state.velocities)
+#         av.set_joint_efforts(av._default_joints_state.efforts)
 
-        self.get_logger().info(f"Teleported robot {self.robot_id} to {pos} | {quat}")
+#         self.get_logger().info(f"Teleported robot {self.robot_id} to {pos} | {quat}")
 
-        response.success = True
-        response.message = "Pose set successfully"
-        return response
+#         response.success = True
+#         response.message = "Pose set successfully"
+#         return response
         
-# Init ROS
-rclpy.init()
+# # Init ROS
+# rclpy.init()
 
-# Create nodes per robot
-nodes = []
-for i in range(num_robots):
-    node = RobotPoseSetterService(i, robots[i])
-    nodes.append(node)
+# # Create nodes per robot
+# nodes = []
+# for i in range(num_robots):
+#     node = RobotPoseSetterService(i, robots[i])
+#     nodes.append(node)
 
-# ---------- Main Simulation Loop ----------
+# # ---------- Main Simulation Loop ----------
 while simulation_app.is_running():
     my_world.step(render=True)
-    # Spin all nodes
-    for node in nodes:
-        rclpy.spin_once(node, timeout_sec=0.001)
+#     # Spin all nodes
+#     for node in nodes:
+#         rclpy.spin_once(node, timeout_sec=0.001)
 
-# Cleanup
-for node in nodes:
-    node.destroy_node()
+# # Cleanup
+# for node in nodes:
+#     node.destroy_node()
 
-rclpy.shutdown()
+# rclpy.shutdown()
 simulation_app.close()

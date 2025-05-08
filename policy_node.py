@@ -1,0 +1,258 @@
+import yaml
+import numpy as np
+import torch
+import time
+
+import rclpy
+from rclpy.node import Node
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import JointState
+
+LEGGED_GYM_ROOT_DIR = 'unitree_rl_gym'
+
+
+def quaternion_to_rotation_matrix(q):
+    x, y, z, w = q
+    return np.array([
+        [1 - 2*(y*y + z*z), 2*(x*y - w*z),     2*(x*z + w*y)],
+        [2*(x*y + w*z),     1 - 2*(x*x + z*z), 2*(y*z - w*x)],
+        [2*(x*z - w*y),     2*(y*z + w*x),     1 - 2*(x*x + y*y)]
+    ])
+
+
+def get_gravity_orientation(quaternion):
+    qw = quaternion[0]
+    qx = quaternion[1]
+    qy = quaternion[2]
+    qz = quaternion[3]
+
+    gravity_orientation = np.zeros(3)
+
+    gravity_orientation[0] = 2 * (-qz * qx + qw * qy)
+    gravity_orientation[1] = -2 * (qz * qy + qw * qx)
+    gravity_orientation[2] = 1 - 2 * (qw * qw + qz * qz)
+
+    return gravity_orientation
+
+
+def pd_control(target_q, q, kp, target_dq, dq, kd):
+    """Calculates torques from position commands"""
+    return (target_q - q) * kp + (target_dq - dq) * kd
+
+
+class G1ObservationSubscriber(Node):
+    def __init__(self, default_angles, ang_vel_scale, dof_pos_scale, dof_vel_scale, cmd_scale):
+        super().__init__('g1_observation_subscriber')
+
+        # simulation parameters
+        self.simulation_dt = 0.01   # 100 Hz timer
+        self.period = 0.8           # for phase signal
+        self.counter = 0
+
+        self.walking_joint_names = [
+            # 'torso_joint', 
+            'left_hip_pitch_joint', 'right_hip_pitch_joint', 'left_hip_roll_joint', 'right_hip_roll_joint',  'left_hip_yaw_joint', 'right_hip_yaw_joint', 'left_knee_joint', 'right_knee_joint', 'left_ankle_pitch_joint', 'right_ankle_pitch_joint', 'left_ankle_roll_joint', 'right_ankle_roll_joint',
+        ]
+
+        # joint‐related scalars (tweak these!)
+        self.default_angles = default_angles
+        self.dof_pos_scale = dof_pos_scale
+        self.dof_vel_scale = dof_vel_scale
+        self.ang_vel_scale = ang_vel_scale
+        self.cmd_scale = cmd_scale
+
+        # storage for latest messages
+        self.odom_msg = None
+        self.joint_msg = None
+        self.obs = None
+
+        # subscriptions
+        self.create_subscription(
+            Odometry,
+            '/G1_0/odom',
+            self.odom_callback,
+            10)
+        self.create_subscription(
+            JointState,
+            '/G1_0/joint_states',
+            self.joint_callback,
+            10)
+        
+        # publisher
+        self.action_pub = self.create_publisher(JointState, '/G1_0/joint_command', 10)
+
+        # periodic processing
+        # self.create_timer(self.simulation_dt, self.timer_callback)
+
+    def odom_callback(self, msg: Odometry):
+        self.odom_msg = msg
+
+    def joint_callback(self, msg: JointState):
+        self.joint_msg = msg
+
+    def timer_callback(self):
+        if self.odom_msg is None or self.joint_msg is None:
+            return
+
+        obs = self.compose_observation()
+        # obs_tensor = torch.from_numpy(obs).unsqueeze(0)  # add batch dim
+
+        # here you could publish obs_tensor, feed to a model, etc.
+        # self.get_logger().info(f'Obs shape: {tuple(obs_tensor.shape)}')
+        self.obs = obs
+        self.counter += 1
+
+    def compose_observation(self, cmd, prev_action) -> np.ndarray:
+        if self.odom_msg is None or self.joint_msg is None:
+            return
+        # --- 1) angular velocity (body) and scaled ---
+        omega = np.array([
+            self.odom_msg.twist.twist.angular.x,
+            self.odom_msg.twist.twist.angular.y,
+            self.odom_msg.twist.twist.angular.z,
+        ]) * self.ang_vel_scale
+
+        # --- 2) gravity orientation in body frame ---
+        quat = np.array([
+            self.odom_msg.pose.pose.orientation.x,
+            self.odom_msg.pose.pose.orientation.y,
+            self.odom_msg.pose.pose.orientation.z,
+            self.odom_msg.pose.pose.orientation.w,
+        ])
+        gravity_ori = get_gravity_orientation(quat)
+
+        # --- 3) joint positions & velocities, scaled & zero‐centered ---
+
+        
+        ros_sec = self.joint_msg.header.stamp.sec
+        ros_nanosec = self.joint_msg.header.stamp.nanosec
+
+        joint_names = self.joint_msg.name
+        walking_joint_indices = []
+        for i, name in enumerate(joint_names):
+            if name in self.walking_joint_names:
+                walking_joint_indices.append(i)
+        walking_joint_indices = np.array(walking_joint_indices)
+
+        qj = np.array(self.joint_msg.position)[walking_joint_indices]
+        dqj = np.array(self.joint_msg.velocity)[walking_joint_indices]
+        qj = (qj - self.default_angles) * self.dof_pos_scale
+        dqj = dqj * self.dof_vel_scale
+
+        # --- 4) phase signal (sin, cos) ---
+        t = self.counter * self.simulation_dt
+        phase = (t % self.period) / self.period
+        sin_p, cos_p = np.sin(2*np.pi*phase), np.cos(2*np.pi*phase)
+
+        # --- 5) concatenate into one vector ---
+        #    [ω(3), gravity_ori(3), qj(36), dqj(36), sin, cos] → length = 80
+        obs = np.concatenate([
+            omega,
+            gravity_ori,
+            cmd * self.cmd_scale,
+            qj,
+            dqj,
+            prev_action,
+            np.array([sin_p, cos_p])
+        ]).astype(np.float32)
+        return obs
+
+    def pub_action(self, action):
+        # publish action to the robot
+
+        action_msg = JointState()
+        # action_msg.header.stamp.sec = self.joint_msg.header.stamp.sec
+        # action_msg.header.stamp.nanosec = self.joint_msg.header.stamp.nanosec
+        action_msg.name = self.joint_msg.name
+        # action_msg.name = self.walking_joint_names
+        # action_msg.position = action.tolist()
+        action_msg.position = [0.0] * len(action_msg.name)
+        action_msg.velocity = [0.0] * len(action_msg.position)
+        action_msg.effort = [0.0] * len(action_msg.position)
+        # action_msg.header.frame_id = self.joint_msg.header.frame_id
+
+        self.action_pub.publish(action_msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+
+
+    with open(f"unitree_rl_gym/deploy/deploy_mujoco/configs/g1.yaml", "r") as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+        policy_path = config["policy_path"].replace("{LEGGED_GYM_ROOT_DIR}", LEGGED_GYM_ROOT_DIR)
+        xml_path = config["xml_path"].replace("{LEGGED_GYM_ROOT_DIR}", LEGGED_GYM_ROOT_DIR)
+
+        simulation_duration = config["simulation_duration"]
+        simulation_dt = config["simulation_dt"]
+        control_decimation = config["control_decimation"]
+
+        kps = np.array(config["kps"], dtype=np.float32)
+        kds = np.array(config["kds"], dtype=np.float32)
+
+        default_angles = np.array(config["default_angles"], dtype=np.float32)
+
+        ang_vel_scale = config["ang_vel_scale"]
+        dof_pos_scale = config["dof_pos_scale"]
+        dof_vel_scale = config["dof_vel_scale"]
+        action_scale = config["action_scale"]
+        cmd_scale = np.array(config["cmd_scale"], dtype=np.float32)
+
+        num_actions = config["num_actions"]
+        num_obs = config["num_obs"]
+        
+        cmd = np.array(config["cmd_init"], dtype=np.float32)
+    
+
+    # define context variables
+    action = np.zeros(num_actions, dtype=np.float32)
+    target_dof_pos = default_angles.copy()
+    obs = np.zeros(num_obs, dtype=np.float32)
+
+    node = G1ObservationSubscriber(default_angles, ang_vel_scale, dof_pos_scale, dof_vel_scale, cmd_scale)
+
+    # load policy
+    policy = torch.jit.load(policy_path)
+
+
+    try:
+        # Close the viewer automatically after simulation_duration wall-seconds.
+        start = time.time()
+        step_start = time.time()
+
+        counter = 0
+        while True:
+            rclpy.spin_once(node)
+            # print(node.obs.shape)
+            # print(node.obs)
+
+            counter += 1
+            if counter % control_decimation == 0:
+                obs = node.compose_observation(cmd, action)
+                obs_tensor = torch.from_numpy(obs).unsqueeze(0)
+
+                # policy inference
+                action = policy(obs_tensor).detach().numpy().squeeze()
+
+                print(action)
+
+                node.pub_action(action)
+
+
+
+                # transform action to target_dof_pos
+                # target_dof_pos = action * action_scale + default_angles
+
+
+
+                # print(target_dof_pos)
+
+    except KeyboardInterrupt:
+        pass
+    
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
