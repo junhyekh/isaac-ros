@@ -8,6 +8,8 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import JointState
+from std_srvs.srv import Trigger
+from builtin_interfaces.msg import Time as TimeMsg
 
 LEGGED_GYM_ROOT_DIR = 'unitree_rl_gym'
 REAL_TIME_FACTOR = 1.0
@@ -58,6 +60,7 @@ class G1ObservationSubscriber(Node):
         self.odom_msg = None
         self.joint_msg = None
         self.obs = None
+        self.simtime = None
         self.init_joint_msg = None
 
         # subscriptions
@@ -72,6 +75,12 @@ class G1ObservationSubscriber(Node):
             self.joint_callback,
             10)
         
+        self.create_subscription(
+            TimeMsg,
+            '/sim_time',
+            self.simtime_callback,
+            10)
+        
         # publisher
         self.action_pub = self.create_publisher(JointState, f'/G1_{self.robot_id}/joint_command', qos_profile=10)
 
@@ -84,6 +93,11 @@ class G1ObservationSubscriber(Node):
         if self.init_joint_msg is None:
             self.init_joint_msg = msg
         self.joint_msg = msg
+
+        # self.simtime = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+    
+    def simtime_callback(self, msg:TimeMsg):
+        self.simtime = msg.sec + msg.nanosec * 1e-9
 
     def compose_observation(self, cmd, prev_action) -> np.ndarray:
         if self.odom_msg is None or self.joint_msg is None:
@@ -105,12 +119,9 @@ class G1ObservationSubscriber(Node):
         gravity_ori = get_gravity_orientation(quat)
 
         # omega = np.zeros_like(omega)
-        # gravity_ori = np.array([0,0,-1]).astype(np.float32)
+        # gravity_ori = np.array([0,0,-9.81]).astype(np.float32)
 
         # --- 3) joint positions & velocities, scaled & zero‐centered ---
-        ros_sec = self.joint_msg.header.stamp.sec
-        ros_nanosec = self.joint_msg.header.stamp.nanosec
-
         joint_names = self.joint_msg.name
         walking_joint_indices = []
         for i, name in enumerate(joint_names):
@@ -118,15 +129,17 @@ class G1ObservationSubscriber(Node):
                 walking_joint_indices.append(i)
         walking_joint_indices = np.array(walking_joint_indices)
 
-        qj = copy.deepcopy(np.array(self.joint_msg.position))[walking_joint_indices]
-        dqj = copy.deepcopy(np.array(self.joint_msg.velocity))[walking_joint_indices]
+        qj = copy.deepcopy(np.array(self.joint_msg.position))[walking_joint_indices]/180.0*np.pi
+        dqj = copy.deepcopy(np.array(self.joint_msg.velocity))[walking_joint_indices]/180.0*np.pi
 
         qj = (qj - self.default_angles) * self.dof_pos_scale
         dqj = dqj * self.dof_vel_scale
 
+        # print(dqj)
+
         # --- 4) phase signal (sin, cos) ---
-        t = ros_sec + ros_nanosec * 1e-9
-        t = t/REAL_TIME_FACTOR
+        # t = ros_sec + ros_nanosec * 1e-9
+        t = copy.deepcopy(self.simtime)/REAL_TIME_FACTOR
         phase = (t % self.period) / self.period
         sin_p, cos_p = np.sin(2*np.pi*phase), np.cos(2*np.pi*phase)
 
@@ -142,7 +155,6 @@ class G1ObservationSubscriber(Node):
             np.array([sin_p, cos_p])
         ]).astype(np.float32)
         return obs
-
 
     def pub_action(self, action: np.ndarray):
         # wait until we have a joint_msg to know the full joint ordering
@@ -171,10 +183,41 @@ class G1ObservationSubscriber(Node):
         msg.name = full_names
         msg.position = full_positions
         # optional: zero velocities & efforts, or keep from joint_msg
-        msg.velocity = [0.0] * len(full_names)
-        msg.effort   = [0.0] * len(full_names)
+        # msg.velocity = [0.0] * len(full_names)
+        # msg.effort   = [0.0] * len(full_names)
 
         self.action_pub.publish(msg)
+
+class ResetPoseClient(Node):
+    def __init__(self, rid):
+        super().__init__('reset_pose_client')
+        self.clientss = {}
+        self.futures = {}
+        # create a client for each robot id
+        # for rid in robot_ids:
+        srv_name = f'/G1_{rid}/set_robot_pose'
+        cli = self.create_client(Trigger, srv_name)
+        while not cli.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(f'Waiting for service {srv_name}...')
+        self.clientss[rid] = cli
+
+    def send_requests(self):
+        for rid, cli in self.clientss.items():
+            req = Trigger.Request()
+            self.futures[rid] = cli.call_async(req)
+
+    def wait_and_report(self):
+        # spin until all requests are done
+        while rclpy.ok() and not all(f.done() for f in self.futures.values()):
+            rclpy.spin_once(self, timeout_sec=0.1)
+        # report results
+        for rid, future in self.futures.items():
+            try:
+                res = future.result()
+                status = "OK" if res.success else "FAIL"
+                self.get_logger().info(f"[Robot {rid}] reset {status}: {res.message}")
+            except Exception as e:
+                self.get_logger().error(f"[Robot {rid}] service call failed: {e}")
 
 
 def main(args=None):
@@ -213,25 +256,30 @@ def main(args=None):
 
     node = G1ObservationSubscriber(default_angles, ang_vel_scale, dof_pos_scale, dof_vel_scale, cmd_scale, ROBOT_ID)
 
+    
+    client = ResetPoseClient(ROBOT_ID)
+
     # load policy
     policy = torch.jit.load(policy_path)
 
 
     try:
         # Close the viewer automatically after simulation_duration wall-seconds.
-        start = time.time()
-        step_start = time.time()
-
-        counter = 0
+        step_start = node.simtime
+        # counter = 0
+        # client.send_requests()
+        # client.wait_and_report()
         while True:
             rclpy.spin_once(node)
             # print(node.obs.shape)
             # print(node.obs)
-
-            counter += 1
+            if node.simtime is None:
+                continue
+            if step_start is None:
+                step_start = node.simtime
             # 50 Hz
-            if time.time() - step_start > 0.02*REAL_TIME_FACTOR:
-                step_start = time.time()
+            if node.simtime - step_start > 0.02*REAL_TIME_FACTOR:
+                step_start = node.simtime
             # if counter % control_decimation == 0:
                 obs = node.compose_observation(cmd, action)
                 if obs is None:

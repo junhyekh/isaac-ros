@@ -35,11 +35,29 @@ from isaacsim.core.prims import SingleArticulation
 import omni.graph.core as og
 from isaacsim.core.utils.extensions import enable_extension
 
+# from isaacsim.core.views import ArticulationView
+from builtin_interfaces.msg import Time as TimeMsg
+from isaacsim.core.api.simulation_context import SimulationContext
+
+
 num_robots = 5
 env_url = "/Isaac/Environments/Grid/default_environment.usd"
 
 enable_extension("isaacsim.ros2.bridge")
 # Creating a action graph with ROS component nodes
+
+class SimTimePublisher(Node):
+    def __init__(self):
+        super().__init__('sim_time_publisher')
+        self.publisher_ = self.create_publisher(TimeMsg, '/sim_time', 10)
+
+    def publish(self, sim_time):
+        # advance sim_time
+        # split into sec / nanosec
+        sec = int(sim_time)
+        nanosec = int((sim_time - sec) * 1e9)
+        msg = TimeMsg(sec=sec, nanosec=nanosec)
+        self.publisher_.publish(msg)
 
 def create_nodes(num_robots):
     nodes = [
@@ -110,6 +128,41 @@ def connect_nodes(num_robots):
     connections += connect("ComputeOdometry", "PublishRawTransformTree_Odom", "position", "translation")
         
     return connections
+
+# def set_values(num_robots):
+#     def set_value(name, attr, value_fn):
+#         return [(f"{name}_Robot_{i}.inputs:{attr}", value_fn(i)) for i in range(num_robots)]
+
+#     setvals = []
+#     # Publish rate
+#     setvals += [("SimulationGate.inputs:step", 1)]
+    
+#     # Controller
+#     setvals += set_value("ArticulationController", "robotPath", lambda i: f"/World/G1_{i}/pelvis/pelvis")
+
+#     # Joint state
+#     setvals += set_value("PublishJointState", "targetPrim", lambda i: f"/World/G1_{i}/pelvis/pelvis")
+
+#     # Namespace
+#     for name in ["PublishJointState", "SubscribeJointState", "PublishOdometry",
+#                  "PublishRawTransformTree", "PublishRawTransformTree_Odom", "PublishTransformTree"]:
+#         setvals += set_value(name, "nodeNamespace", lambda i: f"G1_{i}")
+
+#     # Odometry
+#     setvals += set_value("ComputeOdometry", "chassisPrim", lambda i: f"/World/G1_{i}/pelvis/pelvis")
+#     setvals += set_value("PublishRawTransformTree", "parentFrameId", lambda i: "odom")
+#     setvals += set_value("PublishRawTransformTree", "childFrameId", lambda i: "pelvis")
+#     setvals += set_value("PublishOdometry", "chassisFrameId", lambda i: "pelvis")
+#     setvals += set_value("PublishOdometry", "odomFrameId", lambda i: "odom")
+#     setvals += set_value("PublishRawTransformTree_Odom", "parentFrameId", lambda i: "world")
+#     setvals += set_value("PublishRawTransformTree_Odom", "childFrameId", lambda i: "odom")
+
+#     # # TF
+#     # setvals += set_value("PublishTransformTree", "parentPrim", lambda i: f"/World/G1_{i}/pelvis/pelvis")
+#     # setvals += set_value("PublishTransformTree", "targetPrims", lambda i: f"/World/G1_{i}/pelvis/head_link")
+    
+#     return setvals
+
 
 def set_values(num_robots):
     def set_value(name, attr, value_fn):
@@ -187,7 +240,7 @@ class G1:
         physics_sim_view: omni.physics.tensors.SimulationView = None,
         effort_modes: str = "force",
         control_mode: str = "position",
-        set_gains: bool = True,
+        set_gains: bool = False,
     ) -> None:
         """
         Initializes the robot and sets up the controller.
@@ -263,13 +316,15 @@ class G1:
             else:
                 joints_default_position.append(0.0)
 
-        self.robot.set_joints_default_state(np.array(joints_default_position))
+        # self.robot.set_joints_default_state(np.array(joints_default_position))
         
 
 robots = []
 # spawn world
+physics_dt = 1 / 200
+rendering_dt = 8 / 200
 # my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 200, rendering_dt=8 / 200)
-my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 500, rendering_dt=8 / 200)
+my_world = World(stage_units_in_meters=1.0, physics_dt=physics_dt, rendering_dt=rendering_dt)
 assets_root_path = get_assets_root_path()
 if assets_root_path is None:
     carb.log_error("Could not find Isaac Sim assets folder")
@@ -283,11 +338,12 @@ prim.GetReferences().AddReference(asset_path)
 for i in range(0, num_robots):
     g1 = G1(
         prim_path="/World/G1_" + str(i),
+        # prim_path=f"/World/G1_{i}/pelvis",
         name="G1_" + str(i),
         # usd_path=assets_root_path + "/Isaac/Robots/Unitree/G1/g1_minimal.usd",
         usd_path=assets_root_path + "/Isaac/Robots/Unitree/G1/g1.usd",
         # usd_path='/root/isaac-ros/assets/g1_12dof.usd',
-        position=np.array([0, i, 1.05])
+        position=np.array([0, i, 1.00])
     )
     # g1.prim.initialize()
     robots.append(g1)
@@ -296,7 +352,6 @@ my_world.reset()
 
 for robot in robots:
     robot.initialize()
-
 
 
 # ---------- ROS2 Node for each robot ----------
@@ -336,13 +391,32 @@ nodes = []
 for i in range(num_robots):
     node = RobotPoseSetterService(i, robots[i])
     nodes.append(node)
+sim_time_pub = SimTimePublisher()
+nodes.append(sim_time_pub)
 
 # # ---------- Main Simulation Loop ----------
+
+sim_context = SimulationContext()
+# sim_context = SimulationContext.get_instance()
+physics_cnt = 0
 while simulation_app.is_running():
     my_world.step(render=True)
+    physics_cnt += 1
+    # Publish simulation time
+    sim_time_pub.publish(sim_context.current_time)
     # Spin all nodes
     for node in nodes:
-        rclpy.spin_once(node, timeout_sec=0.001)
+        rclpy.spin_once(node, timeout_sec=0.0001)
+    
+    # ask Isaac Sim for the current physics time
+    print(f"[API]    sim time = {sim_context.current_time:.3f} s")
+    
+    # print(sim_time)
+    # av = robots[0].robot._articulation_view
+    # joint_positions = av.get_joint_positions()
+    # joint_velocities = av.get_joint_velocities()
+    # print("Joint positions: ", joint_positions)
+    # print("Joint velocities: ", joint_velocities)
 
 # # Cleanup
 for node in nodes:
