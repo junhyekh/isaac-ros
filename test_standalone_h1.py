@@ -46,27 +46,6 @@ def float_to_ros_time(t: float) -> Time:
     time_msg.nanosec = int((t % 1) * 1e9)  # 소수점 이하를 나노초로
     return time_msg
 
-def create_nodes(num_robots):
-    nodes = [
-        ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-        ("ReadSimTime", "isaacsim.core.nodes.IsaacReadSimulationTime"),
-        ("PrimService", "isaacsim.ros2.bridge.ROS2ServicePrim"),
-    ]
-
-    def robot_nodes(name, type_str):
-        return [(f"{name}", type_str)]
-
-    nodes += robot_nodes("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState")
-    nodes += robot_nodes("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState")
-    nodes += robot_nodes("ArticulationController", "isaacsim.core.nodes.IsaacArticulationController")
-    nodes += robot_nodes("ComputeOdometry", "isaacsim.core.nodes.IsaacComputeOdometry")
-    nodes += robot_nodes("PublishOdometry", "isaacsim.ros2.bridge.ROS2PublishOdometry")
-    nodes += robot_nodes("PublishRawTransformTree", "isaacsim.ros2.bridge.ROS2PublishRawTransformTree")
-    nodes += robot_nodes("PublishRawTransformTree_Odom", "isaacsim.ros2.bridge.ROS2PublishRawTransformTree")
-    nodes += robot_nodes("PublishTransformTree", "isaacsim.ros2.bridge.ROS2PublishTransformTree")
-
-    return nodes
-
 # Creating a action graph with ROS component nodes
 try:
     og.Controller.edit(
@@ -119,7 +98,6 @@ try:
                 ("ArticulationController.inputs:robotPath", "/World/H1_0"),
                 ("PublishJointState.inputs:targetPrim", "/World/H1_0"),
                 ("PublishJointState.inputs:topicName", "joint_state"),
-                # ("Publish")
                 
                 # new
                 # ('PublishJointState.inputs:nodeNamespace', 'H1_0'),
@@ -197,20 +175,25 @@ class TestROS2Bridge(Node):
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
     def timer_callback(self):
-        # self.joint_state.header.stamp = self.get_clock().now().to_msg()
-        # self.joint_state.header.stamp = float_to_ros_time(my_world.current_time)
-
-        # breakpoint()
-        # action = h1.forward(base_command)
         if h1._policy_counter % h1._decimation == 0:
             if h1._policy_counter > 0:
                 self.obs = h1._compute_observation(self.latest_msg)
 
+                # 0~3: root linear velocity
+                # 3~6: root angular velocity
+                # 6~9: projected gravity
+                
+
+                # 9~12: command (x, y, yaw)
                 self.obs[9:12] = base_command
+                
+                # 12~31: position
+                # 31~50: velocity
+                # 50~69: action
                 self.obs[12:31] = np.array(self.latest_msg.position) - h1.default_pos
                 self.obs[31:50] = np.array(self.latest_msg.velocity)
                 self.obs[50:] = h1._previous_action
-            else:
+            else:  # for timestep 0 there is no message
                 self.obs = h1._compute_observation(self.latest_msg)
 
             # breakpoint()
@@ -218,9 +201,7 @@ class TestROS2Bridge(Node):
         h1.action = h1._compute_action(self.obs)
         h1._previous_action = h1.action.copy()
         
-
         action = h1.default_pos + (h1.action * h1._action_scale)
-        # self.robot.apply_action(action)
         h1._policy_counter += 1
 
         joint_position = np.array(action)
@@ -238,9 +219,8 @@ class TestROS2Bridge(Node):
             position = msg.position[i] if i < len(msg.position) else None
             velocity = msg.velocity[i] if i < len(msg.velocity) else None
 
-        # generate the observation from the messages
+        # save the latest message
         self.latest_msg = msg
-        # self.obs = h1._compute_observation(base_command)
 
 class SimTimePublisher(Node):
     def __init__(self):
@@ -257,8 +237,6 @@ class SimTimePublisher(Node):
 
 my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 200, rendering_dt=1 / 200)
 assets_root_path = get_assets_root_path()
-if assets_root_path is None:
-    carb.log_error("Could not find Isaac Sim assets folder")
 
 # spawn warehouse scene
 prim = define_prim("/World/Ground", "Xform")

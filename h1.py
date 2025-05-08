@@ -87,13 +87,7 @@ class H1FlatTerrainPolicy(PolicyController):
         obs[3:6] = ang_vel_b
         # Gravity
         obs[6:9] = gravity_b
-        # Command
-        # Joint states
-        # current_joint_pos = self.robot.get_joint_positions()
-        # current_joint_vel = self.robot.get_joint_velocities()
-        # obs[12:31] = current_joint_pos - self.default_pos
-        # obs[31:50] = current_joint_vel
-        # Previous Action
+
         return obs
 
     def forward(self, command):
