@@ -22,16 +22,20 @@ from isaacsim.core.utils.prims import define_prim, get_prim_at_path
 from isaacsim.robot.policy.examples.robots import H1FlatTerrainPolicy
 from isaacsim.storage.native import get_assets_root_path
 
-# import rclpy
-# from rclpy.node import Node
-# from geometry_msgs.msg import Pose
-# from std_srvs.srv import SetBool, Trigger
+from isaacsim.core.prims import RigidPrim
+from pxr import UsdPhysics, PhysxSchema
+import omni.usd
+
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Pose
+from std_srvs.srv import SetBool, Trigger
 
 from isaacsim.core.prims import SingleArticulation
 import omni.graph.core as og
 from isaacsim.core.utils.extensions import enable_extension
 
-num_robots = 2
+num_robots = 5
 env_url = "/Isaac/Environments/Grid/default_environment.usd"
 
 enable_extension("isaacsim.ros2.bridge")
@@ -238,7 +242,8 @@ class G1:
 
 robots = []
 # spawn world
-my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 200, rendering_dt=8 / 200)
+# my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 200, rendering_dt=8 / 200)
+my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 500, rendering_dt=8 / 200)
 assets_root_path = get_assets_root_path()
 if assets_root_path is None:
     carb.log_error("Could not find Isaac Sim assets folder")
@@ -253,7 +258,9 @@ for i in range(0, num_robots):
     g1 = G1(
         prim_path="/World/G1_" + str(i),
         name="G1_" + str(i),
+        # usd_path=assets_root_path + "/Isaac/Robots/Unitree/G1/g1_minimal.usd",
         usd_path=assets_root_path + "/Isaac/Robots/Unitree/G1/g1.usd",
+        # usd_path='/root/isaac-ros/assets/g1_12dof.usd',
         position=np.array([0, i, 1.05])
     )
     # g1.prim.initialize()
@@ -264,54 +271,56 @@ my_world.reset()
 for robot in robots:
     robot.initialize()
 
-# # ---------- ROS2 Node for each robot ----------
-# class RobotPoseSetterService(Node):
-#     def __init__(self, robot_id, robot: G1):
-#         super().__init__(f'robot_pose_setter_{robot_id}')
-#         self.robot_id = robot_id
-#         self.robot = robot
 
-#         service_name = f'/G1_{robot_id}/set_robot_pose'
-#         self.srv = self.create_service(Trigger, service_name, self.handle_set_pose)
 
-#         self.get_logger().info(f"Service ready on {service_name}")
+# ---------- ROS2 Node for each robot ----------
+class RobotPoseSetterService(Node):
+    def __init__(self, robot_id, robot: G1):
+        super().__init__(f'robot_pose_setter_{robot_id}')
+        self.robot_id = robot_id
+        self.robot = robot
 
-#     def handle_set_pose(self, request, response):
-#         av = self.robot.robot._articulation_view
-#         pos = self.robot.default_position[None, :]
-#         quat = self.robot.default_orientation[None, :]
+        service_name = f'/G1_{robot_id}/set_robot_pose'
+        self.srv = self.create_service(Trigger, service_name, self.handle_set_pose)
+
+        self.get_logger().info(f"Service ready on {service_name}")
+
+    def handle_set_pose(self, request, response):
+        av = self.robot.robot._articulation_view
+        pos = self.robot.default_position[None, :]
+        quat = self.robot.default_orientation[None, :]
         
-#         # Teleport (local pose can be used if parent does not move)
-#         av.set_local_poses(translations=pos, orientations=quat)
-#         av.set_joint_positions(av._default_joints_state.positions)
-#         av.set_joint_velocities(av._default_joints_state.velocities)
-#         av.set_joint_efforts(av._default_joints_state.efforts)
+        # Teleport (local pose can be used if parent does not move)
+        av.set_local_poses(translations=pos, orientations=quat)
+        av.set_joint_positions(av._default_joints_state.positions)
+        av.set_joint_velocities(av._default_joints_state.velocities)
+        av.set_joint_efforts(av._default_joints_state.efforts)
 
-#         self.get_logger().info(f"Teleported robot {self.robot_id} to {pos} | {quat}")
+        self.get_logger().info(f"Teleported robot {self.robot_id} to {pos} | {quat}")
 
-#         response.success = True
-#         response.message = "Pose set successfully"
-#         return response
+        response.success = True
+        response.message = "Pose set successfully"
+        return response
         
-# # Init ROS
-# rclpy.init()
+# Init ROS
+rclpy.init()
 
 # # Create nodes per robot
-# nodes = []
-# for i in range(num_robots):
-#     node = RobotPoseSetterService(i, robots[i])
-#     nodes.append(node)
+nodes = []
+for i in range(num_robots):
+    node = RobotPoseSetterService(i, robots[i])
+    nodes.append(node)
 
 # # ---------- Main Simulation Loop ----------
 while simulation_app.is_running():
     my_world.step(render=True)
-#     # Spin all nodes
-#     for node in nodes:
-#         rclpy.spin_once(node, timeout_sec=0.001)
+    # Spin all nodes
+    for node in nodes:
+        rclpy.spin_once(node, timeout_sec=0.001)
 
 # # Cleanup
-# for node in nodes:
-#     node.destroy_node()
+for node in nodes:
+    node.destroy_node()
 
 # rclpy.shutdown()
 simulation_app.close()
