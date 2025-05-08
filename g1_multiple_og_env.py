@@ -40,7 +40,7 @@ from builtin_interfaces.msg import Time as TimeMsg
 from isaacsim.core.api.simulation_context import SimulationContext
 
 
-num_robots = 5
+num_robots = 1
 env_url = "/Isaac/Environments/Grid/default_environment.usd"
 
 enable_extension("isaacsim.ros2.bridge")
@@ -129,51 +129,17 @@ def connect_nodes(num_robots):
         
     return connections
 
-# def set_values(num_robots):
-#     def set_value(name, attr, value_fn):
-#         return [(f"{name}_Robot_{i}.inputs:{attr}", value_fn(i)) for i in range(num_robots)]
-
-#     setvals = []
-#     # Publish rate
-#     setvals += [("SimulationGate.inputs:step", 1)]
-    
-#     # Controller
-#     setvals += set_value("ArticulationController", "robotPath", lambda i: f"/World/G1_{i}/pelvis/pelvis")
-
-#     # Joint state
-#     setvals += set_value("PublishJointState", "targetPrim", lambda i: f"/World/G1_{i}/pelvis/pelvis")
-
-#     # Namespace
-#     for name in ["PublishJointState", "SubscribeJointState", "PublishOdometry",
-#                  "PublishRawTransformTree", "PublishRawTransformTree_Odom", "PublishTransformTree"]:
-#         setvals += set_value(name, "nodeNamespace", lambda i: f"G1_{i}")
-
-#     # Odometry
-#     setvals += set_value("ComputeOdometry", "chassisPrim", lambda i: f"/World/G1_{i}/pelvis/pelvis")
-#     setvals += set_value("PublishRawTransformTree", "parentFrameId", lambda i: "odom")
-#     setvals += set_value("PublishRawTransformTree", "childFrameId", lambda i: "pelvis")
-#     setvals += set_value("PublishOdometry", "chassisFrameId", lambda i: "pelvis")
-#     setvals += set_value("PublishOdometry", "odomFrameId", lambda i: "odom")
-#     setvals += set_value("PublishRawTransformTree_Odom", "parentFrameId", lambda i: "world")
-#     setvals += set_value("PublishRawTransformTree_Odom", "childFrameId", lambda i: "odom")
-
-#     # # TF
-#     # setvals += set_value("PublishTransformTree", "parentPrim", lambda i: f"/World/G1_{i}/pelvis/pelvis")
-#     # setvals += set_value("PublishTransformTree", "targetPrims", lambda i: f"/World/G1_{i}/pelvis/head_link")
-    
-#     return setvals
-
-
 def set_values(num_robots):
     def set_value(name, attr, value_fn):
         return [(f"{name}_Robot_{i}.inputs:{attr}", value_fn(i)) for i in range(num_robots)]
 
     setvals = []
+
     # Controller
-    setvals += set_value("ArticulationController", "robotPath", lambda i: f"/World/G1_{i}")
+    setvals += set_value("ArticulationController", "robotPath", lambda i: f"/World/G1_{i}/pelvis")
 
     # Joint state
-    setvals += set_value("PublishJointState", "targetPrim", lambda i: f"/World/G1_{i}")
+    setvals += set_value("PublishJointState", "targetPrim", lambda i: f"/World/G1_{i}/pelvis")
 
     # Namespace
     for name in ["PublishJointState", "SubscribeJointState", "PublishOdometry",
@@ -181,7 +147,7 @@ def set_values(num_robots):
         setvals += set_value(name, "nodeNamespace", lambda i: f"G1_{i}")
 
     # Odometry
-    setvals += set_value("ComputeOdometry", "chassisPrim", lambda i: f"/World/G1_{i}")
+    setvals += set_value("ComputeOdometry", "chassisPrim", lambda i: f"/World/G1_{i}/pelvis")
     setvals += set_value("PublishRawTransformTree", "parentFrameId", lambda i: "odom")
     setvals += set_value("PublishRawTransformTree", "childFrameId", lambda i: "pelvis")
     setvals += set_value("PublishOdometry", "chassisFrameId", lambda i: "pelvis")
@@ -189,11 +155,12 @@ def set_values(num_robots):
     setvals += set_value("PublishRawTransformTree_Odom", "parentFrameId", lambda i: "world")
     setvals += set_value("PublishRawTransformTree_Odom", "childFrameId", lambda i: "odom")
 
-    # TF
-    setvals += set_value("PublishTransformTree", "parentPrim", lambda i: f"/World/G1_{i}/pelvis")
-    setvals += set_value("PublishTransformTree", "targetPrims", lambda i: f"/World/G1_{i}/torso_link")
-
+    # # TF
+    # setvals += set_value("PublishTransformTree", "parentPrim", lambda i: f"/World/G1_{i}/pelvis/pelvis")
+    # setvals += set_value("PublishTransformTree", "targetPrims", lambda i: f"/World/G1_{i}/pelvis/head_link")
+    
     return setvals
+
 
 # ----------- MAIN -------------
 try:
@@ -316,13 +283,14 @@ class G1:
             else:
                 joints_default_position.append(0.0)
 
-        # self.robot.set_joints_default_state(np.array(joints_default_position))
+        self.robot.set_joints_default_state(np.array(joints_default_position))
+        self.robot.set_enabled_self_collisions(True)
         
 
 robots = []
 # spawn world
-physics_dt = 1 / 500
-rendering_dt = 1 / 100
+physics_dt = 1 / 200
+rendering_dt = 1 / 200
 # my_world = World(stage_units_in_meters=1.0, physics_dt=1 / 200, rendering_dt=8 / 200)
 my_world = World(stage_units_in_meters=1.0, physics_dt=physics_dt, rendering_dt=rendering_dt)
 assets_root_path = get_assets_root_path()
@@ -330,9 +298,17 @@ if assets_root_path is None:
     carb.log_error("Could not find Isaac Sim assets folder")
 
 # spawn warehouse scene
-prim = define_prim("/World/Ground", "Xform")
-asset_path = assets_root_path + env_url
-prim.GetReferences().AddReference(asset_path)
+# prim = define_prim("/World/Ground", "Xform")
+# asset_path = assets_root_path + env_url
+# prim.GetReferences().AddReference(asset_path)
+my_world.scene.add_default_ground_plane(
+            z_position=0,
+            name="default_ground_plane",
+            prim_path="/World/defaultGroundPlane",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.01,
+)
 
 # spawn robot
 for i in range(0, num_robots):
@@ -340,10 +316,8 @@ for i in range(0, num_robots):
         prim_path="/World/G1_" + str(i),
         # prim_path=f"/World/G1_{i}/pelvis",
         name="G1_" + str(i),
-        # usd_path=assets_root_path + "/Isaac/Robots/Unitree/G1/g1_minimal.usd",
-        usd_path=assets_root_path + "/Isaac/Robots/Unitree/G1/g1.usd",
-        # usd_path='/root/isaac-ros/assets/g1_12dof.usd',
-        position=np.array([0, i, 0.80])
+        usd_path="/isaac-sim/nmanshow/g1_12dof/g1_12dof.usd",
+        position=np.array([0, i, 0.8])
     )
     # g1.prim.initialize()
     robots.append(g1)
@@ -376,6 +350,8 @@ class RobotPoseSetterService(Node):
         av.set_joint_positions(av._default_joints_state.positions)
         av.set_joint_velocities(av._default_joints_state.velocities)
         av.set_joint_efforts(av._default_joints_state.efforts)
+        
+        av.set_joint_position_targets(av._default_joints_state.positions)
 
         self.get_logger().info(f"Teleported robot {self.robot_id} to {pos} | {quat}")
 
