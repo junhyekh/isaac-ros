@@ -36,6 +36,7 @@ from std_srvs.srv import SetBool, Trigger
 from nav_msgs.msg import Odometry
 
 from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.api.objects import VisualCuboid
 import omni.graph.core as og
 from isaacsim.core.utils.extensions import enable_extension
 
@@ -44,7 +45,7 @@ from builtin_interfaces.msg import Time as TimeMsg
 from isaacsim.core.api.simulation_context import SimulationContext
 
 
-num_robots = 5
+num_robots = 11
 env_url = "/Isaac/Environments/Grid/default_environment.usd"
 
 enable_extension("isaacsim.ros2.bridge")
@@ -237,7 +238,7 @@ class G1:
 
         self.default_position = np.array([0.0, 0.0, 0.0]) if position is None else position
         self.default_orientation = np.array([1.0, 0.0, 0.0, 0.0]) if orientation is None else orientation
-    
+            
     def initialize(
         self,
         physics_sim_view: omni.physics.tensors.SimulationView = None,
@@ -350,6 +351,25 @@ my_world.scene.add_default_ground_plane(
             restitution=0.01,
 )
 
+color_names = [
+    "Red", "Orange Red", "Orange", "Gold", "Yellow",
+    "Chartreuse", "Green", "Turquoise", "Sky Blue", "Blue", "Violet"
+]
+
+colors = [
+    [1.0, 0.0, 0.0],
+    [1.0, 0.27, 0.0],
+    [1.0, 0.5, 0.0],
+    [1.0, 0.84, 0.0],
+    [1.0, 1.0, 0.0],
+    [0.5, 1.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 1.0, 1.0],
+    [0.0, 0.5, 1.0],
+    [0.0, 0.0, 1.0],
+    [0.54, 0.17, 0.89]
+]
+
 # spawn robot
 for i in range(0, num_robots):
     g1 = G1(
@@ -360,7 +380,18 @@ for i in range(0, num_robots):
         usd_path=os.path.join(BASEDIR, "g1_12dof/g1_12dof.usd"),
         position=np.array([0, i, 0.8])
     )
-    # g1.prim.initialize()
+
+    cube = my_world.scene.add(
+        VisualCuboid(
+            name="visual_cube_" + str(i),
+            position=np.array([0, i, 1.5]),
+            prim_path="/World/G1_" + str(i) + "/pelvis/Cube",
+            size=1.0,
+            scale=np.array([0.1, 0.5, 0.1]),
+            color=np.array(colors[i]),
+        )
+    )
+    
     robots.append(g1)
 
 my_world.reset()
