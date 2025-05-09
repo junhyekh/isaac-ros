@@ -1,4 +1,3 @@
-import yaml
 import numpy as np
 import torch
 import time
@@ -39,7 +38,7 @@ def get_gravity_orientation(quaternion):
     return gravity_orientation
 
 class G1ObservationSubscriber(Node):
-    def __init__(self, default_angles, ang_vel_scale, dof_pos_scale, dof_vel_scale, cmd_scale, robot_id=0):
+    def __init__(self, default_angles, robot_id=0):
         super().__init__('g1_observation_subscriber')
 
         self.robot_id = robot_id
@@ -53,11 +52,16 @@ class G1ObservationSubscriber(Node):
         ]
 
         # joint‐related scalars
+        self.ang_vel_scale = 0.25
+        self.dof_pos_scale = 1.0
+        self.dof_vel_scale = 0.05
+        self.cmd_scale = np.array([2,2,0.25], dtype=np.float32)
+        
         self.default_angles = default_angles
-        self.dof_pos_scale = dof_pos_scale
-        self.dof_vel_scale = dof_vel_scale
-        self.ang_vel_scale = ang_vel_scale
-        self.cmd_scale = cmd_scale
+        # self.dof_pos_scale = dof_pos_scale
+        # self.dof_vel_scale = dof_vel_scale
+        # self.ang_vel_scale = ang_vel_scale
+        # self.cmd_scale = cmd_scale
 
         # storage for latest messages
         self.odom_msg = None
@@ -206,19 +210,13 @@ class ResetPoseClient(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    with open(f"unitree_rl_gym/deploy/deploy_mujoco/configs/g1.yaml", "r") as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
-        policy_path = config["policy_path"].replace("{LEGGED_GYM_ROOT_DIR}", LEGGED_GYM_ROOT_DIR)
-        default_angles = np.array(config["default_angles"], dtype=np.float32)
-        ang_vel_scale = config["ang_vel_scale"]
-        dof_pos_scale = config["dof_pos_scale"]
-        dof_vel_scale = config["dof_vel_scale"]
-        action_scale = config["action_scale"]
-        cmd_scale = np.array(config["cmd_scale"], dtype=np.float32)
-    action = np.zeros(12, dtype=np.float32)
+    policy_path = 'assets/weights/pre_train/g1/motion.pt'
+    default_angles = np.array([-0.1,  0. ,  0. ,  0.3, -0.2,  0. , -0.1,  0. ,  0. ,  0.3, -0.2, 0. ], dtype=np.float32)
+    action_scale = 0.25
+    
 
     # init ROS node
-    node = G1ObservationSubscriber(default_angles, ang_vel_scale, dof_pos_scale, dof_vel_scale, cmd_scale, ROBOT_ID)
+    node = G1ObservationSubscriber(default_angles, ROBOT_ID)
     client = ResetPoseClient(ROBOT_ID)
 
     # load policy
@@ -230,6 +228,7 @@ def main(args=None):
         step_start = node.simtime
         client.send_requests()
         client.wait_and_report()
+        action = np.zeros(12, dtype=np.float32)
         cmd = np.array([0.5,0,0.0], dtype=np.float32)
         while True:
             if time.time() - keyboard_start > 0.001:
