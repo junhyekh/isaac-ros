@@ -72,26 +72,26 @@ class G1ObservationSubscriber(Node):
             f'/G1_{self.robot_id}/joint_states',
             self.joint_callback,
             10)
-        ## TODO: subscribe to odom and simtime #####
+        ## TODO Practice 0: subscribe to odom and simtime #####
 
-        ## TODO: subscribe to odom and simtime #####
+        ## TODO Practice 0: subscribe to odom and simtime #####
         
-        ## TODO: create action publisher #####
+        ## TODO Practice 1: create action publisher #####
         # publisher
 
-        ## TODO: create action publisher #####
+        ## TODO Practice 1: create action publisher #####
 
     def joint_callback(self, msg: JointState):
         if self.init_joint_msg is None:
             self.init_joint_msg = msg
         self.joint_msg = msg
     
-    ## TODO: create odom and simtime callback #####
+    ## TODO Practice 0: create odom and simtime callback #####
     # def odom_callback(self, msg: Odometry):
 
     # def simtime_callback(self, msg:TimeMsg):
 
-    ## TODO: create odom and simtime callback #####
+    ## TODO Practice 0: create odom and simtime callback #####
 
     def compose_observation(self, cmd, prev_action, base_ang_vel, base_quat, recieved_joint_names, joint_pos, joint_vel, simtime) -> np.ndarray:
         # --- 1) angular velocity (body) and scaled ---
@@ -135,11 +135,11 @@ class G1ObservationSubscriber(Node):
         joint_pos = np.array(copy.deepcopy(self.joint_msg.position))
         joint_vel = np.array(copy.deepcopy(self.joint_msg.velocity))
         
-        ### TODO: subscribe and get simtime / base_ang_vel / base_quat #####
+        ### TODO Practice 2: subscribe and get simtime / base_ang_vel / base_quat #####
         simtime = float(0.0)
         base_ang_vel = np.zeros(3, dtype=np.float32)
         base_quat = np.zeros(4, dtype=np.float32)
-        ### TODO: subscribe and get simtime / base_ang_vel / base_quat #####
+        ### TODO Practice 2: subscribe and get simtime / base_ang_vel / base_quat #####
         
         return self.compose_observation(cmd, prev_action, base_ang_vel, base_quat, recieved_joint_names, joint_pos, joint_vel, simtime)
 
@@ -166,7 +166,7 @@ class G1ObservationSubscriber(Node):
 
         full_names, action_ordered = self.match_joint_order(action)
         
-        ### TODO: write publish code here #####
+        ### TODO Practice 1: write publish code here #####
         # build and publish the message
         
         ########################################
