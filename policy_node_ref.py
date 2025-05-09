@@ -73,12 +73,21 @@ class G1ObservationSubscriber(Node):
             self.joint_callback,
             10)
         ## TODO: subscribe to odom and simtime #####
-
+        self.create_subscription(
+            Odometry,
+            f'/G1_{self.robot_id}/odom',
+            self.odom_callback,
+            10)
+        self.create_subscription(
+            TimeMsg,
+            '/sim_time',
+            self.simtime_callback,
+            10)
         ## TODO: subscribe to odom and simtime #####
         
         ## TODO: create action publisher #####
         # publisher
-
+        self.action_pub = self.create_publisher(JointState, f'/G1_{self.robot_id}/joint_command', 10)
         ## TODO: create action publisher #####
 
     def joint_callback(self, msg: JointState):
@@ -87,10 +96,13 @@ class G1ObservationSubscriber(Node):
         self.joint_msg = msg
     
     ## TODO: create odom and simtime callback #####
-    # def odom_callback(self, msg: Odometry):
+    def odom_callback(self, msg: Odometry):
+        self.odom_msg = msg
 
-    # def simtime_callback(self, msg:TimeMsg):
-
+    def simtime_callback(self, msg:TimeMsg):
+        if self.init_simtime is None:
+            self.init_simtime = msg.sec + msg.nanosec * 1e-9
+        self.simtime = msg.sec + msg.nanosec * 1e-9 - self.init_simtime
     ## TODO: create odom and simtime callback #####
 
     def compose_observation(self, cmd, prev_action, base_ang_vel, base_quat, recieved_joint_names, joint_pos, joint_vel, simtime) -> np.ndarray:
@@ -136,9 +148,18 @@ class G1ObservationSubscriber(Node):
         joint_vel = np.array(copy.deepcopy(self.joint_msg.velocity))
         
         ### TODO: subscribe and get simtime / base_ang_vel / base_quat #####
-        simtime = float(0.0)
-        base_ang_vel = np.zeros(3, dtype=np.float32)
-        base_quat = np.zeros(4, dtype=np.float32)
+        simtime = copy.deepcopy(self.simtime)
+        base_ang_vel = np.array([
+            self.odom_msg.twist.twist.angular.x,
+            self.odom_msg.twist.twist.angular.y,
+            self.odom_msg.twist.twist.angular.z,
+        ])
+        base_quat = np.array([
+            self.odom_msg.pose.pose.orientation.x,
+            self.odom_msg.pose.pose.orientation.y,
+            self.odom_msg.pose.pose.orientation.z,
+            self.odom_msg.pose.pose.orientation.w,
+        ])
         ### TODO: subscribe and get simtime / base_ang_vel / base_quat #####
         
         return self.compose_observation(cmd, prev_action, base_ang_vel, base_quat, recieved_joint_names, joint_pos, joint_vel, simtime)
@@ -168,7 +189,10 @@ class G1ObservationSubscriber(Node):
         
         ### TODO: write publish code here #####
         # build and publish the message
-        
+        msg = JointState()
+        msg.name = full_names
+        msg.position = action_ordered
+        self.action_pub.publish(msg)
         ########################################
 
 class ResetPoseClient(Node):
